@@ -1,0 +1,110 @@
+---
+title: Getting Started
+---
+
+# Getting Started
+
+## Install
+
+```bash
+go get github.com/floatpane/go-patchapply
+```
+
+Requires Go 1.26+. Its only dependency is its sibling,
+[go-mailpatch](https://github.com/floatpane/go-mailpatch).
+
+## Apply a patch in three lines
+
+```go
+p, _ := mailpatch.ParseBytes(raw)            // parse the email
+fsys := patchapply.NewDirFS("/path/to/repo") // confined to this root
+res, err := patchapply.ApplyPatch(fsys, p, nil)
+```
+
+A full program:
+
+```go
+package main
+
+import (
+	"log"
+	"os"
+
+	"github.com/floatpane/go-mailpatch"
+	"github.com/floatpane/go-patchapply"
+)
+
+func main() {
+	raw, _ := os.ReadFile("fix.patch")
+
+	p, err := mailpatch.ParseBytes(raw)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fsys := patchapply.NewDirFS("/path/to/repo")
+	res, err := patchapply.ApplyPatch(fsys, p, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, f := range res.Files {
+		log.Printf("%s %s", f.Status, f.Path)
+	}
+}
+```
+
+## The entry points
+
+| Function | Input | Use when |
+|----------|-------|----------|
+| `ApplyPatch` | a `*mailpatch.Patch` | you parsed a format-patch email |
+| `ApplyDiff` | a bare diff string | you have just a `git diff` |
+| `Apply` | `[]mailpatch.FileChange` | you already have parsed changes |
+| `ApplyToBytes` | one file's content | you want no filesystem at all |
+
+```go
+res, err := patchapply.ApplyPatch(fsys, patch, opts)
+res, err := patchapply.ApplyDiff(fsys, diffText, opts)
+res, err := patchapply.Apply(fsys, files, opts)
+out, err := patchapply.ApplyToBytes(orig, fileChange)
+```
+
+`opts` may be `nil`.
+
+## The result
+
+```go
+type Result struct {
+	Files []FileResult
+}
+
+type FileResult struct {
+	Path    string // resulting path (the removed path, for a deletion)
+	OldPath string // previous path for a rename, else empty
+	Status  Status // Created | Updated | Removed | Renamed
+	Hunks   int    // hunks applied
+}
+```
+
+## Errors
+
+```go
+import "errors"
+
+_, err := patchapply.ApplyPatch(fsys, p, nil)
+switch {
+case errors.Is(err, patchapply.ErrConflict):
+	// a hunk's context could not be matched
+case errors.Is(err, patchapply.ErrUnsafePath):
+	// a path tried to escape the DirFS root
+case errors.Is(err, patchapply.ErrMissing):
+	// modify/delete/rename of a file that isn't there
+case errors.Is(err, patchapply.ErrExists):
+	// add of a file that already exists
+}
+```
+
+> [!IMPORTANT]
+> Apply is **transactional**: on any error, nothing is written. You never get a
+> half-applied tree.
