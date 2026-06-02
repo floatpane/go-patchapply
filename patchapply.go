@@ -218,22 +218,31 @@ func planFile(fsys FS, f mailpatch.FileChange) (planContent, error) {
 			result: FileResult{Path: f.NewPath, Status: Created, Hunks: len(f.Hunks)},
 		}
 
-	default: // Modified
-		target := f.Path()
-		orig, err := readExisting(fsys, target)
-		if err != nil {
-			return p, err
-		}
-		content, err := ApplyToBytes(orig, f)
-		if err != nil {
-			return p, err
-		}
-		p = planContent{
-			writePath: target, content: content, perm: parseMode(f.NewMode), doWrite: true,
-			result: FileResult{Path: target, Status: Updated, Hunks: len(f.Hunks)},
-		}
+	case mailpatch.Modified:
+		return planModify(fsys, f)
+
+	default:
+		// Unknown change type: treat it as a modification.
+		return planModify(fsys, f)
 	}
 	return p, nil
+}
+
+// planModify computes the plan for an in-place edit of an existing file.
+func planModify(fsys FS, f mailpatch.FileChange) (planContent, error) {
+	target := f.Path()
+	orig, err := readExisting(fsys, target)
+	if err != nil {
+		return planContent{}, err
+	}
+	content, err := ApplyToBytes(orig, f)
+	if err != nil {
+		return planContent{}, err
+	}
+	return planContent{
+		writePath: target, content: content, perm: parseMode(f.NewMode), doWrite: true,
+		result: FileResult{Path: target, Status: Updated, Hunks: len(f.Hunks)},
+	}, nil
 }
 
 func readExisting(fsys FS, name string) ([]byte, error) {
